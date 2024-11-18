@@ -16,11 +16,11 @@ app.get("/api", async (req, res) => {
   if (process.env.AWS_LAMBDA_FUNCTION_VERSION) {
     console.log("asfd");
     options = {
-      // args: [...chrome.args, "--hide-scrollbars", "--disable-web-security"],
-      // defaultViewport: chrome.defaultViewport,
-      // // executablePath: await chrome.executablePath,
-      // headless: true,
-      // ignoreHTTPSErrors: true,
+      args: [...chrome.args, "--hide-scrollbars", "--disable-web-security"],
+      defaultViewport: chrome.defaultViewport,
+      executablePath: await chrome.executablePath,
+      headless: true,
+      ignoreHTTPSErrors: true,
     };
   }
 
