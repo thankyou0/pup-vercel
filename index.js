@@ -1,17 +1,62 @@
 // import { Cluster } from "puppeteer-cluster";
 const { Cluster } = require("puppeteer-cluster");
 const app = require("express")();
+const dotenv = require("dotenv");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+// import fs from 'fs';
+// import path from 'path';
+// import os from 'os';
+dotenv.config();
 
-let chrome = {};
+let chromium;
 let puppeteer;
 
-if (process.env.AWS_LAMBDA_FUNCTION_VERSION) {
-  chrome = require("chrome-aws-lambda");
-  puppeteer = require("puppeteer-core");
-} else {
+const isLocal = process.env.CHROME_EXECUTABLE_PATH ? true : false;
+// console.log(process.env.CHROME_EXECUTABLE_PATH, isLocal);
+if (isLocal) {
   puppeteer = require("puppeteer");
+} else {
+  // console.log("a");
+  puppeteer = require("puppeteer-core");
+  chromium = require("@sparticuz/chromium")
 }
 
+
+delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+
+const findChromeUserDataDir = () => {
+  let possiblePaths = [];
+
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA;
+    const appData = process.env.APPDATA;
+    const username = process.env.USERNAME || os.userInfo().username;
+
+    if (localAppData) {
+      possiblePaths.push(path.join(localAppData, 'Google', 'Chrome', 'User Data'));
+    }
+    if (appData) {
+      possiblePaths.push(path.join(appData, 'Google', 'Chrome', 'User Data'));
+    }
+    possiblePaths.push(path.join('C:', 'Users', username, 'AppData', 'Local', 'Google', 'Chrome', 'User Data'));
+  } else if (process.platform === 'darwin') {
+    possiblePaths.push(path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome'));
+  } else {
+    possiblePaths.push(path.join(os.homedir(), '.config', 'google-chrome'));
+  }
+
+  for (const dir of possiblePaths) {
+    if (fs.existsSync(dir)) {
+      return dir;
+    }
+  }
+
+  console.log('Could not find Chrome user data directory');
+  return null;
+};
 
 const scanForLinks = async (page) => {
   const element = await page.$("div.SoaBEf");
@@ -57,15 +102,37 @@ const scanForLinks = async (page) => {
 };
 
 app.get("/topstories", async (req, res) => {
+
+  let userDataDir = null;
   
+  if (isLocal) {
+    userDataDir = findChromeUserDataDir();
+    if (!userDataDir) {
+      console.error('Unable to find Chrome user data directory. Please specify it manually.');
+      return;
+    }
+  }
+
+
   try {
     const puppeteerOptions = {
-      headless: process.env.AWS_LAMBDA_FUNCTION_VERSION ? chrome.headless : false,
-      args: process.env.AWS_LAMBDA_FUNCTION_VERSION
-        ? [...chrome.args, "--no-sandbox", "--disable-setuid-sandbox"]
-        : ["--no-sandbox", "--disable-setuid-sandbox"],
-      executablePath: process.env.AWS_LAMBDA_FUNCTION_VERSION ? await chrome.executablePath : undefined,
-      defaultViewport: null,
+      // headless: process.env.AWS_LAMBDA_FUNCTION_VERSION ? chrome.headless : false,
+      // args: process.env.AWS_LAMBDA_FUNCTION_VERSION
+      //   ? [...chrome.args, "--no-sandbox", "--disable-setuid-sandbox"]
+      //   : ["--no-sandbox", "--disable-setuid-sandbox"],
+      // executablePath: process.env.AWS_LAMBDA_FUNCTION_VERSION ? await chrome.executablePath : undefined,
+      // defaultViewport: null,
+      args: isLocal ? [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        `--user-data-dir=${userDataDir}`,
+        "--enable-automation"  // This flag might be necessary for some 
+      ]
+        : [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--hide-scrollbars'],
+      defaultViewport: isLocal ? null : chromium.defaultViewport,
+      executablePath: process.env.CHROME_EXECUTABLE_PATH || await chromium.executablePath() || puppeteer.executablePath(),
+      headless: isLocal ? false : chromium.headless,
+      ignoreDefaultArgs: isLocal ? ['--enable-automation'] : chromium.ignoreDefaultArgs,
     };
 
     const cluster = await Cluster.launch({
@@ -88,6 +155,8 @@ app.get("/topstories", async (req, res) => {
       // );
 
       await page.goto(url, { waitUntil: "networkidle2" });
+
+      // await delay(20000);
 
       const articles = await scanForLinks(page);
       allArticles = [...allArticles, ...articles];
